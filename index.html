@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASQOT AI Mini App</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 10px;
+            background: var(--tg-theme-bg-color);
+            color: var(--tg-theme-text-color);
+            transition: background 0.3s, color 0.3s;
+        }
+        #chat {
+            height: calc(100vh - 150px); /* Adjust for viewport */
+            overflow-y: scroll;
+            border: 1px solid var(--tg-theme-section-separator-color);
+            padding: 10px;
+            background: var(--tg-theme-section-bg-color);
+            margin-bottom: 10px;
+        }
+        #chat p {
+            margin: 5px 0;
+            padding: 8px;
+            border-radius: 8px;
+        }
+        #chat .user {
+            background: var(--tg-theme-accent-text-color);
+            color: white;
+            text-align: right;
+        }
+        #chat .ai {
+            background: var(--tg-theme-secondary-bg-color);
+        }
+        #input {
+            width: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+            background: var(--tg-theme-bg-color);
+            color: var(--tg-theme-text-color);
+            border: 1px solid var(--tg-theme-section-separator-color);
+        }
+        #voice-btn {
+            padding: 10px;
+            background: var(--tg-theme-button-color);
+            color: var(--tg-theme-button-text-color);
+            border: none;
+            margin-top: 5px;
+        }
+        /* Respect safe areas */
+        body {
+            padding-top: var(--tg-safe-area-inset-top);
+            padding-bottom: var(--tg-safe-area-inset-bottom);
+            padding-left: var(--tg-safe-area-inset-left);
+            padding-right: var(--tg-safe-area-inset-right);
+        }
+    </style>
+</head>
+<body>
+    <h1>ASQOT AI</h1>
+    <div id="chat"></div>
+    <input id="input" type="text" placeholder="Savolingizni kiriting...">
+    <button id="voice-btn" onclick="startVoiceRecognition()">🎤 Ovoz orqali kiritish</button>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        // Theme handling
+        function applyTheme() {
+            document.body.style.background = tg.themeParams.bg_color;
+            // Other styles updated via CSS vars automatically
+        }
+        applyTheme();
+        tg.onEvent('themeChanged', applyTheme);
+
+        // MainButton setup
+        const mainButton = tg.MainButton;
+        mainButton.setText('Yuborish');
+        mainButton.onClick(sendMessage);
+        mainButton.show();
+
+        // Sectors
+        const sectors = ['Davlat xizmatlari', 'Tibbiyot', 'Ta’lim', 'Energetika', 'Logistika', 'Qishloq xo‘jaligi', 'Biznes jarayonlari'];
+        let selectedSector = sectors[0]; // Default
+
+        // Show sector selection popup on load
+        tg.showPopup({
+            title: 'Sektor tanlang',
+            message: 'AI yordamchi uchun sektor tanlang',
+            buttons: sectors.map((s, i) => ({ id: i.toString(), text: s }))
+        }, (buttonId) => {
+            if (buttonId !== undefined) {
+                selectedSector = sectors[parseInt(buttonId)];
+                addToChat('system', `Sektor tanlandi: ${selectedSector}`);
+            }
+        });
+
+        // Chat history from localStorage
+        const chatHistory = JSON.parse(localStorage.getItem('asqotChat')) || [];
+        const chatDiv = document.getElementById('chat');
+
+        // Voice output settings
+        let autoSpeak = false; // Default off
+        let selectedVoiceLang = localStorage.getItem('asqotVoiceLang') || 'uz-UZ'; // Default Uzbek
+        const speechSynth = window.speechSynthesis;
+        let availableVoices = [];
+        let selectedVoice = null;
+
+        if (!speechSynth) {
+            tg.showAlert('Ovoz chiqarish moslamasi mavjud emas (brauzer qo‘llab-quvvatlamaydi).');
+        } else {
+            // Load voices asynchronously
+            speechSynth.onvoiceschanged = loadVoices;
+            loadVoices(); // Initial call in case already loaded
+        }
+
+        function loadVoices() {
+            availableVoices = speechSynth.getVoices();
+            updateSelectedVoice();
+        }
+
+        function updateSelectedVoice() {
+            selectedVoice = availableVoices.find(v => v.lang === selectedVoiceLang) || availableVoices[0];
+            if (!selectedVoice) {
+                tg.showAlert('Tanlangan til uchun ovoz topilmadi. Standart ishlatilmoqda.');
+            }
+        }
+
+        function getAvailableLanguages() {
+            const langs = [...new Set(availableVoices.map(v => v.lang))];
+            return langs.length > 0 ? langs : ['en-US', 'ru-RU', 'uz-UZ']; // Fallback common langs
+        }
+
+        function addToChat(role, message) {
+            const p = document.createElement('p');
+            p.classList.add(role === 'Siz' ? 'user' : 'ai');
+            p.innerHTML = `<b>${role}:</b> ${message}`;
+            if (role === 'ASQOT AI') {
+                const copyBtn = document.createElement('button');
+                copyBtn.textContent = 'Nusxa olish';
+                copyBtn.onclick = () => copyToClipboard(message);
+                p.appendChild(copyBtn);
+
+                const speakBtn = document.createElement('button');
+                speakBtn.textContent = 'Ovoz chiqarish';
+                speakBtn.onclick = () => speakText(message);
+                p.appendChild(speakBtn);
+
+                if (autoSpeak) {
+                    speakText(message);
+                }
+            }
+            chatDiv.appendChild(p);
+            chatDiv.scrollTop = chatDiv.scrollHeight;
+            chatHistory.push({ role, message });
+            localStorage.setItem('asqotChat', JSON.stringify(chatHistory));
+        }
+
+        // Load history
+        chatHistory.forEach(({ role, message }) => addToChat(role, message));
+
+        // Send message
+        function sendMessage() {
+            const input = document.getElementById('input');
+            const query = input.value.trim();
+            if (!query) return;
+
+            addToChat('Siz', query);
+            input.value = '';
+
+            // Haptic feedback
+            tg.HapticFeedback.impactOccurred('light');
+
+            // Show progress
+            mainButton.showProgress(true);
+
+            // Prefix with sector
+            const fullQuery = `${selectedSector}: ${query}`;
+
+            fetch('https://your-asqot-ai-backend.com/api/ai/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: fullQuery, user_id: tg.initDataUnsafe.user.id })
+            })
+            .then(response => response.json())
+            .then(data => {
+                addToChat('ASQOT AI', data.response);
+                tg.HapticFeedback.notificationOccurred('success');
+            })
+            .catch(error => {
+                tg.showAlert('Xato: ' + error.message);
+                tg.HapticFeedback.notificationOccurred('error');
+            })
+            .finally(() => {
+                mainButton.hideProgress();
+            });
+        }
+
+        // Voice recognition
+        function startVoiceRecognition() {
+            if (!('webkitSpeechRecognition' in window)) {
+                tg.showAlert('Ovoz tanish moslamasi mavjud emas');
+                return;
+            }
+            const recognition = new webkitSpeechRecognition();
+            recognition.lang = selectedVoiceLang; // Match input to output lang
+            recognition.onresult = (event) => {
+                document.getElementById('input').value = event.results[0][0].transcript;
+                tg.HapticFeedback.selectionChanged();
+            };
+            recognition.onerror = () => tg.showAlert('Ovoz tanishda xato');
+            recognition.start();
+        }
+
+        // Voice output
+        function speakText(text) {
+            if (!speechSynth) return;
+            speechSynth.cancel(); // Stop previous speech
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = selectedVoiceLang;
+            if (selectedVoice) utterance.voice = selectedVoice;
+            utterance.volume = 1;
+            utterance.rate = 1;
+            utterance.pitch = 1;
+            speechSynth.speak(utterance);
+            tg.HapticFeedback.impactOccurred('soft');
+        }
+
+        // Copy to clipboard
+        function copyToClipboard(text) {
+            tg.writeTextToClipboard(text);
+            tg.showAlert('Nusxa olindi!');
+            tg.HapticFeedback.impactOccurred('medium');
+        }
+
+        // Settings button for reselection, auto-speak, and language selection
+        tg.SettingsButton.show();
+        tg.SettingsButton.onClick(() => {
+            tg.showPopup({
+                title: 'Sozlamalar',
+                message: 'Sektor o‘zgartirish, avto-ovoz yoki til tanlash',
+                buttons: [
+                    { id: 'sector', text: 'Sektor o‘zgartirish' },
+                    { id: 'auto_speak', text: autoSpeak ? 'Avto-ovozni o‘chirish' : 'Avto-ovozni yoqish' },
+                    { id: 'language', text: 'Til tanlash (ovoz)' }
+                ]
+            }, (buttonId) => {
+                if (buttonId === 'sector') {
+                    tg.showPopup({
+                        title: 'Sektor o‘zgartirish',
+                        message: 'Yangi sektor tanlang',
+                        buttons: sectors.map((s, i) => ({ id: i.toString(), text: s }))
+                    }, (sectorId) => {
+                        if (sectorId !== undefined) {
+                            selectedSector = sectors[parseInt(sectorId)];
+                            addToChat('system', `Sektor o‘zgartirildi: ${selectedSector}`);
+                        }
+                    });
+                } else if (buttonId === 'auto_speak') {
+                    autoSpeak = !autoSpeak;
+                    addToChat('system', `Avto-ovoz: ${autoSpeak ? 'Yoqilgan' : 'O‘chirilgan'}`);
+                } else if (buttonId === 'language') {
+                    const langs = getAvailableLanguages();
+                    tg.showPopup({
+                        title: 'Ovoz tilini tanlang',
+                        message: 'Mavjud tillar:',
+                        buttons: langs.map((l, i) => ({ id: i.toString(), text: l }))
+                    }, (langId) => {
+                        if (langId !== undefined) {
+                            selectedVoiceLang = langs[parseInt(langId)];
+                            localStorage.setItem('asqotVoiceLang', selectedVoiceLang);
+                            updateSelectedVoice();
+                            addToChat('system', `Ovoz tili o‘zgartirildi: ${selectedVoiceLang}`);
+                        }
+                    });
+                }
+            });
+        });
+
+        // Closing confirmation
+        tg.enableClosingConfirmation();
+    </script>
+</body>
+</html>
